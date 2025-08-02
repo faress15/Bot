@@ -1,0 +1,13 @@
+{
+  "current": {
+    "id": "repeat_in_string",
+    "question": "متدی بنویس که تعداد تکرار string B توی string A رو بشماره...",
+    "language": "python",
+    "function_name": "repeat_in_string",
+    "test_cases": [
+      { "input": ["golgoli", "gol"], "expected": 2 },
+      { "input": ["aaaaaa", "aa"], "expected": 5 },
+      { "input": ["hello", "l"], "expected": 2 }
+    ]
+  }
+}
