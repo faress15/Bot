@@ -6,35 +6,30 @@ from bot import start, rank, receive_code
 import asyncio
 
 app = Flask(__name__)
-
 application = Application.builder().token(BOT_TOKEN).build()
 
-# افزودن هندلرها
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("rank", rank))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code))
 
-# راه‌اندازی application به صورت async
-async def run_bot():
+# یک فانکشن async جدا برای راه‌اندازی بات
+async def start_bot():
     await application.initialize()
     await application.start()
-    print("✅ Telegram bot application started.")
+    print("✅ Telegram bot started")
 
-# اجرای ربات هنگام استارت
-@app.before_request
-def start_bot_once():
-    if not hasattr(app, 'bot_started'):
-        app.bot_started = True
-        asyncio.get_event_loop().create_task(run_bot())
+# هنگام اولین درخواست، بات رو async اجرا کن
+@app.before_first_request
+def before_first_request():
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_bot())
 
-# Webhook endpoint
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
     application.update_queue.put_nowait(update)
     return "ok", 200
 
-# صفحه اصلی برای تست
 @app.route("/", methods=["GET"])
 def home():
     return "Bot is running!", 200
