@@ -14,13 +14,18 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("rank", rank))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code))
 
-# راه‌اندازی application به صورت async در Flask context
-@app.before_first_request
-def init_bot():
-    loop = asyncio.get_event_loop()
-    loop.create_task(application.initialize())
-    loop.create_task(application.start())
+# راه‌اندازی application به صورت async
+async def run_bot():
+    await application.initialize()
+    await application.start()
     print("✅ Telegram bot application started.")
+
+# اجرای ربات هنگام استارت
+@app.before_request
+def start_bot_once():
+    if not hasattr(app, 'bot_started'):
+        app.bot_started = True
+        asyncio.get_event_loop().create_task(run_bot())
 
 # Webhook endpoint
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
