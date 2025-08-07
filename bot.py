@@ -3,7 +3,7 @@ import datetime
 import requests
 from config import BOT_TOKEN, PISTON_URL
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ContextTypes
 
 # بارگذاری سوال فعلی
 def load_challenge():
@@ -13,7 +13,10 @@ def load_challenge():
 # ذخیره جواب درست
 def save_submission(name, code):
     with open("submissions.json", "r+", encoding="utf-8") as f:
-        submissions = json.load(f)
+        try:
+            submissions = json.load(f)
+        except json.JSONDecodeError:
+            submissions = []
         submissions.append({
             "name": name,
             "code": code,
@@ -21,6 +24,7 @@ def save_submission(name, code):
         })
         f.seek(0)
         json.dump(submissions, f, indent=2, ensure_ascii=False)
+        f.truncate()
 
 # اجرای کد روی Piston API
 def run_code(language, code, func_name, test_cases):
@@ -30,7 +34,7 @@ def run_code(language, code, func_name, test_cases):
 
         payload = {
             "language": language,
-            "version": "3.10.0",  # نسخه مشخص مهمه!
+            "version": "3.10.0",
             "files": [
                 {
                     "name": "main.py",
@@ -50,12 +54,7 @@ def run_code(language, code, func_name, test_cases):
         stderr = result.get("run", {}).get("stderr", "").strip()
         expected = str(case["expected"])
 
-        print("👉 کد تست شده:", test_code)
-        print("📤 خروجی:", repr(output))
-        print("⚠️ خطا:", repr(stderr))
-        print("🎯 انتظار داشتیم:", repr(expected))
-
-        if output != expected:
+        if output != expected or stderr:
             return False
     return True
 
@@ -76,7 +75,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👀 منتظر کدت هستم! موفق باشی 💪"
     )
     
-    await update.message.reply_text(explanation, parse_mode="Markdown")
+    await update.message.reply_text(explanation)
 
 
 # دریافت کد
@@ -99,18 +98,11 @@ async def receive_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # دستور /rank
 async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open("submissions.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            data = []
+
         names = [s["name"] for s in data]
         leaderboard = "\n".join(f"{i+1}. {name}" for i, name in enumerate(sorted(set(names))))
         await update.message.reply_text("🏆 لیست افراد موفق:\n\n" + leaderboard)
-
-# اجرای بات
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("rank", rank))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code))
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
