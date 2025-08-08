@@ -1,187 +1,126 @@
-import logging
-import os
 import json
+import datetime
+import requests
+import os
+from config import BOT_TOKEN, PISTON_URL
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-    ConversationHandler,
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# فعال‌سازی لاگ برای خطایابی بهتر
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# بارگذاری سوال فعلی
+def load_challenge():
+    with open("challenges.json", "r", encoding="utf-8") as f:
+        return json.load(f)["current"]
 
-# --- تعریف چالش کدنویسی و تست‌ها ---
-# نام تابعی که از کاربر انتظار داریم تعریف کند
-EXPECTED_FUNCTION_NAME = "count_substring"
+# ذخیره جواب درست
+def save_submission(name, code):
+    with open("submissions.json", "r+", encoding="utf-8") as f:
+        submissions = json.load(f)
+        submissions.append({
+            "name": name,
+            "code": code,
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        f.seek(0)
+        json.dump(submissions, f, indent=2, ensure_ascii=False)
 
-CHALLENGE_DESCRIPTION = f"""
-✅ **چالش کدنویسی این هفته**
+def run_code(language, code, func_name, test_cases):
+    for case in test_cases:
+        inputs = ", ".join([repr(i) for i in case["input"]])
+        test_code = f"""{code}\nprint({func_name}({inputs}))"""
 
-تابعی در پایتون به نام `{EXPECTED_FUNCTION_NAME}` بنویس که دو رشته `main_str` و `sub_str` را به عنوان ورودی دریافت کرده و تعداد تکرارهای `sub_str` در `main_str` را برگرداند.
+        payload = {
+            "language": language,
+            "version": "3.10.0",  # نسخه مشخص مهمه!
+            "files": [
+                {
+                    "name": "main.py",
+                    "content": test_code
+                }
+            ],
+            "stdin": "",
+            "args": [],
+            "compile_timeout": 10000,
+            "run_timeout": 3000
+        }
 
-❗️ **نکته مهم:** تکرارهای همپوشان (overlapping) نیز باید شمرده شوند.
+        response = requests.post(PISTON_URL, json=payload)
+        result = response.json()
 
-مثال:
-`count_substring("aaaaaa", "aa")` باید عدد `5` را برگرداند.
+        output = result.get("run", {}).get("stdout", "").strip().splitlines()[-1]
+        stderr = result.get("run", {}).get("stderr", "").strip()
+        expected = str(case["expected"])
 
-کد کامل تابع خود را ارسال کن.
-"""
+        print("👉 کد تست شده:", test_code)
+        print("📤 خروجی:", repr(output))
+        print("⚠️ خطا:", repr(stderr))
+        print("🎯 انتظار داشتیم:", repr(expected))
 
-# لیست تست کیس‌ها برای ارزیابی کد کاربر
-TEST_CASES = [
-    {"input": ["golgoli", "gol"], "expected": 2},
-    {"input": ["aaaaaa", "aa"], "expected": 5},
-    {"input": ["hello", "l"], "expected": 2},
-    {"input": ["ababab", "aba"], "expected": 2},
-    {"input": ["", "a"], "expected": 0},
-    {"input": ["abc", ""], "expected": 4}, # شمارش رشته خالی در رشته به طول n برابر n+1 است
-]
+        if output != expected:
+            return False
+    return True
 
-WINNERS_FILE = "winners.json"
 
-# --- تعریف مراحل مکالمه ---
-AWAITING_CODE = 0
-
-# --- توابع مربوط به ذخیره‌سازی ---
-def load_winners():
-    if not os.path.exists(WINNERS_FILE):
-        return []
-    try:
-        with open(WINNERS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return []
-
-def save_winner(user):
-    winners = load_winners()
-    if user.id not in [w['id'] for w in winners]:
-        winners.append({'id': user.id, 'full_name': user.full_name, 'username': user.username})
-        with open(WINNERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(winners, f, ensure_ascii=False, indent=4)
-        return True
-    return False
-
-# --- توابع اصلی ربات ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """شروع مکالمه و ارسال صورت مسئله چالش"""
-    user = update.effective_user
-    await update.message.reply_html(
-        rf"سلام {user.mention_html()}! به چالش کدنویسی این هفته خوش آمدی.",
+# دستور /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    challenge = load_challenge()
+    
+    explanation = (
+        f"👋 سلام {update.effective_user.first_name}!\n\n"
+        "به چالش هفتگی کدنویسی خوش اومدی! 🧠💻\n\n"
+        "📌 سوال این هفته:\n"
+        f"{challenge['question']}\n\n"
+        "📥 لطفاً تابع خودتو فقط به صورت تابع بنویس (نه کلاس، نه main).\n"
+        f"🧪 زبان: {challenge['language']}\n"
+        f"📌 تابع باید این نام رو داشته باشه: `{challenge['function_name']}`\n"
+        "📤 بعد از ارسال، بات با چند ورودی تست بررسی می‌کنه اگه درست بود اسمت رو ثبت می‌کنه.\n\n"
+        "👀 منتظر کدت هستم! موفق باشی 💪"
     )
-    await update.message.reply_text(CHALLENGE_DESCRIPTION)
-    return AWAITING_CODE
+    
+    await update.message.reply_text(explanation, parse_mode="Markdown")
 
-async def evaluate_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """کد ارسالی کاربر را دریافت، اجرا و ارزیابی می‌کند"""
+
+# دریافت کد
+async def receive_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_code = update.message.text
-    user = update.effective_user
+    user_name = update.message.from_user.full_name
+    challenge = load_challenge()
     
-    execution_context = {}
-    try:
-        # اجرای کد کاربر در یک دیکشنری محدود برای امنیت بیشتر
-        exec(user_code, execution_context)
-    except Exception as e:
-        await update.message.reply_text(f"❌ کد شما دارای خطای ساختاری (Syntax) است و اجرا نشد:\n`{e}`")
-        return ConversationHandler.END
-
-    # بررسی اینکه آیا تابع مورد نظر توسط کاربر تعریف شده است
-    if EXPECTED_FUNCTION_NAME not in execution_context or not callable(execution_context[EXPECTED_FUNCTION_NAME]):
-        await update.message.reply_text(f"کد شما باید تابعی به نام `{EXPECTED_FUNCTION_NAME}` تعریف کند. لطفاً دوباره تلاش کنید.")
-        return ConversationHandler.END
-        
-    user_function = execution_context[EXPECTED_FUNCTION_NAME]
+    success = run_code(
+        challenge["language"], user_code,
+        challenge["function_name"], challenge["test_cases"]
+    )
     
-    # اجرای تست کیس‌ها
-    for i, test in enumerate(TEST_CASES):
-        main_str, sub_str = test["input"]
-        expected = test["expected"]
-        try:
-            actual = user_function(main_str, sub_str)
-            if actual != expected:
-                await update.message.reply_text(
-                    f"❌ تست شماره {i+1} ناموفق بود.\n"
-                    f"ورودی: `('{main_str}', '{sub_str}')`\n"
-                    f"خروجی مورد انتظار: `{expected}`\n"
-                    f"خروجی کد شما: `{actual}`\n\n"
-                    "لطفاً کد خود را اصلاح کرده و دوباره با دستور /start تلاش کنید."
-                )
-                return ConversationHandler.END # پایان مکالمه در صورت شکست
-        except Exception as e:
-            await update.message.reply_text(
-                f"❌ کد شما در حین اجرا روی تست شماره {i+1} با خطا مواجه شد:\n`{e}`\n\n"
-                "لطفاً کد خود را اصلاح کرده و دوباره با دستور /start تلاش کنید."
-            )
-            return ConversationHandler.END
-
-    # اگر تمام تست‌ها موفقیت‌آمیز بود
-    await update.message.reply_text("✅ تبریک! کد شما تمام تست‌ها را با موفقیت پشت سر گذاشت.")
-    if save_winner(user):
-        await update.message.reply_text("نام شما در لیست برندگان این هفته ثبت شد! 🏆")
+    if success:
+        save_submission(user_name, user_code)
+        await update.message.reply_text("✅ آفرین! جواب درسته 🎉 اسمت ثبت شد.")
     else:
-        await update.message.reply_text("شما قبلاً در لیست برندگان ثبت شده‌اید.")
-        
-    return ConversationHandler.END
+        await update.message.reply_text("❌ متاسفم، خروجی درست نبود. دوباره تلاش کن!")
 
-async def show_winners(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """لیست برندگان را نمایش می‌دهد"""
-    winners = load_winners()
-    if not winners:
-        await update.message.reply_text("هنوز هیچ برنده‌ای در این هفته ثبت نشده است.")
-        return
+# دستور /rank
+async def rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with open("submissions.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+        names = [s["name"] for s in data]
+        leaderboard = "\n".join(f"{i+1}. {name}" for i, name in enumerate(sorted(set(names))))
+        await update.message.reply_text("🏆 لیست افراد موفق:\n\n" + leaderboard)
 
-    message = "🏆 **لیست برندگان این هفته** 🏆\n\n"
-    for i, winner in enumerate(winners):
-        user_display = winner.get('full_name', 'کاربر ناشناس')
-        if winner.get('username'):
-            user_display += f" (@{winner['username']})"
-        message += f"{i+1}. {user_display}\n"
-    
-    await update.message.reply_text(message, parse_mode='Markdown')
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("rank", rank))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code))
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """مکالمه را لغو می‌کند"""
-    await update.message.reply_text("چالش لغو شد. برای شروع مجدد /start را بزنید.")
-    return ConversationHandler.END
-
-def main() -> None:
-    """راه‌اندازی و اجرای ربات"""
-    TOKEN = os.environ.get("TOKEN")
-    WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-
-    if not TOKEN:
-        raise ValueError("متغیر TOKEN در تنظیمات رندر یافت نشد.")
-    if not WEBHOOK_URL:
-        raise ValueError("متغیر WEBHOOK_URL در تنظیمات رندر یافت نشد.")
-
-    application = Application.builder().token(TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            AWAITING_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, evaluate_code)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("winners", show_winners)) # افزودن دستور جدید
-    
-    port = int(os.environ.get("PORT", 8443))
-    
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=TOKEN,
-        webhook_url=f"https://{WEBHOOK_URL}/{TOKEN}"
-    )
+    # تنظیم Webhook
+    webhook_url = os.getenv('WEBHOOK_URL')  # URL سرور شما
+    if webhook_url:
+        app.run_webhook(
+            listen='0.0.0.0',
+            port=int(os.getenv('PORT', 8443)),  # پورت پیش‌فرض 8443 یا متغیر PORT
+            url_path=BOT_TOKEN,
+            webhook_url=f'{webhook_url}/{BOT_TOKEN}'
+        )
+    else:
+        app.run_polling()  # برای تست محلی
 
 if __name__ == "__main__":
     main()
-
