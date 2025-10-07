@@ -1,7 +1,0 @@
-[
-  {
-    "name": "Fares",
-    "code": "def repeat_in_string(A, B):\n    count = 0\n    for i in range(len(A) - len(B) + 1):\n        if A[i:i+len(B)] == B:\n            count += 1\n    return count",
-    "timestamp": "2025-08-08T14:35:19.636726"
-  }
-]
