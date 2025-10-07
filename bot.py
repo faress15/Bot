@@ -111,7 +111,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_code))
 
     # تنظیم Webhook
-    webhook_url = os.getenv('WEBHOOK_URL')  # URL سرور شما
+    webhook_url = os.getenv('https://bot-qalm.onrender.com')  # URL سرور شما
     if webhook_url:
         app.run_webhook(
             listen='0.0.0.0',
